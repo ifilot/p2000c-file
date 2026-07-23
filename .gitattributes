@@ -1,0 +1,2 @@
+# CP/M source: preserve CR/LF line endings and the trailing 1Ah EOF marker.
+src/P2FILE.ASM -text

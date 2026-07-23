@@ -1,0 +1,13 @@
+# Local build trees and temporary files
+build/
+dist/
+.cache/
+__pycache__/
+*.pyc
+.DS_Store
+*~
+
+# Optional host-side output from manual ASM/LOAD workflows
+*.HEX
+*.PRN
+*.SYM
