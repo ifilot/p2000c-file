@@ -23,19 +23,6 @@ jobs:
           repository: ifilot/p2000c-asm
           path: p2000c-asm
 
-      - name: Check out CP/M assembler tools
-        uses: actions/checkout@v6
-        with:
-          repository: ifilot/p2000c-emulator
-          path: p2000c-emulator
-          sparse-checkout: media/files/core
-
-      - name: Install CP/M tools for p2000c-asm
-        run: |
-          mkdir -p p2000c-asm/cpm
-          cp p2000c-emulator/media/files/core/ASM.COM p2000c-asm/cpm/
-          cp p2000c-emulator/media/files/core/LOAD.COM p2000c-asm/cpm/
-
       - name: Build p2000c-asm
         run: |
           cmake -S p2000c-asm -B p2000c-asm/build \
