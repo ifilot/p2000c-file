@@ -5,8 +5,8 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 emulator_root=${P2000C_EMULATOR_DIR:-"${script_dir}/../p2000c-emulator"}
 gui=${P2000C_GUI:-}
+system_disk=${P2000C_SYSTEM_DISK:-}
 
-system_disk="${emulator_root}/assets/images/cpm/system.flp"
 app_disk="${script_dir}/dist/p2file.flp"
 
 find_gui() {
@@ -23,10 +23,29 @@ find_gui() {
   return 1
 }
 
+find_system_disk() {
+  local candidate
+  for candidate in \
+    "${emulator_root}/assets/images/cpm/system.flp" \
+    "${emulator_root}/images/cpm/system.flp"; do
+    if [[ -f "${candidate}" ]]; then
+      system_disk=${candidate}
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ -z "${gui}" ]] && ! find_gui; then
   printf 'P2000C GUI executable not found under %s/build.\n' \
     "${emulator_root}" >&2
   printf 'Build the emulator or set P2000C_GUI to its executable.\n' >&2
+  exit 1
+fi
+
+if [[ -z "${system_disk}" ]] && ! find_system_disk; then
+  printf 'CP/M system floppy not found under %s.\n' "${emulator_root}" >&2
+  printf 'Set P2000C_SYSTEM_DISK to the system.flp path.\n' >&2
   exit 1
 fi
 
