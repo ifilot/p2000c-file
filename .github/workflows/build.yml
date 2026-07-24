@@ -1,0 +1,105 @@
+name: Build and release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Assemble P2FILE
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out P2FILE
+        uses: actions/checkout@v6
+
+      - name: Check out latest p2000c-asm
+        uses: actions/checkout@v6
+        with:
+          repository: ifilot/p2000c-asm
+          path: p2000c-asm
+
+      - name: Check out CP/M assembler tools
+        uses: actions/checkout@v6
+        with:
+          repository: ifilot/p2000c-emulator
+          path: p2000c-emulator
+          sparse-checkout: media/files/core
+
+      - name: Install CP/M tools for p2000c-asm
+        run: |
+          mkdir -p p2000c-asm/cpm
+          cp p2000c-emulator/media/files/core/ASM.COM p2000c-asm/cpm/
+          cp p2000c-emulator/media/files/core/LOAD.COM p2000c-asm/cpm/
+
+      - name: Build p2000c-asm
+        run: |
+          cmake -S p2000c-asm -B p2000c-asm/build \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build p2000c-asm/build --config Release --parallel
+
+      - name: Test p2000c-asm
+        run: ctest --test-dir p2000c-asm/build --output-on-failure
+
+      - name: Assemble and package P2FILE
+        env:
+          P2000C_ASSEMBLER: ${{ github.workspace }}/p2000c-asm/build/p2000c-asm
+        run: ./scripts/build.sh
+
+      - name: Verify release artifacts
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: p2file-build
+          path: |
+            dist/P2FILE.COM
+            dist/p2file.flp
+            dist/SHA256SUMS
+            dist/VERSION
+          if-no-files-found: error
+
+  release:
+    name: Publish tagged release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: p2file-build
+          path: release-assets
+
+      - name: Validate release tag
+        working-directory: release-assets
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          expected_tag="v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            printf 'Release tag %s does not match VERSION (%s).\n' \
+              "${GITHUB_REF_NAME}" "${expected_tag}" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release-assets/P2FILE.COM \
+            release-assets/p2file.flp \
+            release-assets/SHA256SUMS \
+            --verify-tag \
+            --generate-notes \
+            --title "P2FILE ${GITHUB_REF_NAME}"

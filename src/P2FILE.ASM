@@ -6,7 +6,7 @@
 ;     P2FILE
 ;
 ; Keys: TAB panel, W/S move, SPACE mark, C copy, D delete, R rename,
-;       V choose drive, Q quit.
+;       V choose drive, H help, Q quit.
 ;
 ; Intel 8080 source.  The program uses only documented CP/M 2.2 BDOS calls
 ; and documented P2000C terminal escape sequences.
@@ -27,12 +27,11 @@ SETDMA  EQU     1AH
 FSIZE   EQU     23H
 
 MAXFILE EQU     128
-ROWS    EQU     22
+ROWS    EQU     21
 FIRST   EQU     1
 ENTSIZ  EQU     15
 NORMATT EQU     40H
 INVATT  EQU     50H
-BOLDINV EQU     11H
 CPBUFR  EQU     32
 
         ORG     0100H
@@ -60,7 +59,7 @@ KEYFOOT:
         LDA     FOOTMSG
         ORA     A
         JZ      KEYLOAD
-        CALL    DRAWHELP
+        CALL    DRAWFOOT
 KEYLOAD:LDA     KEYTMP
         CPI     'a'
         JC      KEYUP
@@ -87,6 +86,8 @@ KEYUP:  CPI     09H
         JZ      KREN
         CPI     'V'
         JZ      KDRIVE
+        CPI     'H'
+        JZ      KHELP
         CPI     'Q'
         JZ      KQUIT
         JMP     KEYLOOP
@@ -128,6 +129,10 @@ KREN:
         JMP     KEYLOOP
 
 KDRIVE:CALL    PICKDRIVE
+        JMP     MAIN
+
+KHELP: CALL    SHOWHELP
+        CALL    GETKEY
         JMP     MAIN
 
 KQUIT:  MVI     A,0CH
@@ -317,11 +322,13 @@ DRAW:   CALL    DRAWSHELL
         RET
 
 DRAWSHELL:
+        MVI     A,NORMATT
+        CALL    SETATTR
         MVI     A,0CH
         CALL    PUTC
         CALL    DRAWL
         CALL    DRAWR
-        CALL    DRAWHELP
+        CALL    DRAWFOOT
         RET
 
 ; Populate exact sizes only for the two visible windows. The initial panel
@@ -376,22 +383,146 @@ FZNEXT: LDA     SZIDX
         STA     SZLEFT
         JMP     FZLOOP
 
-DRAWHELP:
-        MVI     B,23
+DRAWFOOT:
+        MVI     B,22
         MVI     C,0
         CALL    POS
         MVI     A,INVATT
         CALL    SETATTR
-        MVI     A,1BH
-        CALL    PUTC
-        MVI     A,'K'
-        CALL    PUTC
-        LXI     H,HELP
+        CALL    CLEAR79
+        MVI     B,22
+        MVI     C,1
+        CALL    POS
+        LXI     H,MENU1
+        CALL    PRINTZ
+        MVI     B,23
+        MVI     C,0
+        CALL    POS
+        CALL    CLEAR79
+        MVI     B,23
+        MVI     C,1
+        CALL    POS
+        LXI     H,MENU2
+        CALL    PRINTZ
+        MVI     B,23
+        MVI     C,65
+        CALL    POS
+        LXI     H,APPNAME
         CALL    PRINTZ
         MVI     A,NORMATT
         CALL    SETATTR
         XRA     A
         STA     FOOTMSG
+        RET
+
+CLEAR79:
+        MVI     D,79
+CFLOOP: MVI     A,' '
+        CALL    PUTC
+        DCR     D
+        JNZ     CFLOOP
+        RET
+
+SHOWHELP:
+        MVI     A,NORMATT
+        CALL    SETATTR
+        MVI     A,0CH
+        CALL    PUTC
+        MVI     B,0
+        MVI     C,0
+        CALL    POS
+        MVI     A,INVATT
+        CALL    SETATTR
+        CALL    CLEAR79
+        MVI     B,0
+        MVI     C,2
+        CALL    POS
+        LXI     H,HELPHEAD
+        CALL    PRINTZ
+        MVI     B,0
+        MVI     C,73
+        CALL    POS
+        LXI     H,SHORTVER
+        CALL    PRINTZ
+        MVI     A,NORMATT
+        CALL    SETATTR
+        MVI     B,2
+        MVI     C,4
+        CALL    POS
+        LXI     H,HELPDESC
+        CALL    PRINTZ
+        MVI     B,4
+        MVI     C,4
+        CALL    POS
+        LXI     H,HELPKEYS
+        CALL    PRINTZ
+        MVI     B,5
+        MVI     C,6
+        CALL    POS
+        LXI     H,HELPK1
+        CALL    PRINTZ
+        MVI     B,6
+        MVI     C,6
+        CALL    POS
+        LXI     H,HELPK2
+        CALL    PRINTZ
+        MVI     B,7
+        MVI     C,6
+        CALL    POS
+        LXI     H,HELPK3
+        CALL    PRINTZ
+        MVI     B,8
+        MVI     C,6
+        CALL    POS
+        LXI     H,HELPK4
+        CALL    PRINTZ
+        MVI     B,10
+        MVI     C,4
+        CALL    POS
+        LXI     H,REPOHEAD
+        CALL    PRINTZ
+        MVI     B,11
+        MVI     C,6
+        CALL    POS
+        LXI     H,REPOURL
+        CALL    PRINTZ
+        MVI     B,13
+        MVI     C,4
+        CALL    POS
+        LXI     H,LICHEAD
+        CALL    PRINTZ
+        MVI     B,14
+        MVI     C,6
+        CALL    POS
+        LXI     H,LICTEXT
+        CALL    PRINTZ
+        MVI     B,15
+        MVI     C,6
+        CALL    POS
+        LXI     H,LICFILE
+        CALL    PRINTZ
+        MVI     B,22
+        MVI     C,0
+        CALL    POS
+        MVI     A,INVATT
+        CALL    SETATTR
+        CALL    CLEAR79
+        MVI     B,22
+        MVI     C,24
+        CALL    POS
+        LXI     H,HELPBACK
+        CALL    PRINTZ
+        MVI     B,23
+        MVI     C,0
+        CALL    POS
+        CALL    CLEAR79
+        MVI     B,23
+        MVI     C,65
+        CALL    POS
+        LXI     H,APPNAME
+        CALL    PRINTZ
+        MVI     A,NORMATT
+        CALL    SETATTR
         RET
 
 DRAWL:  CALL    SETL
@@ -442,12 +573,7 @@ DRAWP:  CALL    DRAWHDR
 DRAWHDR:
         MVI     A,INVATT
         STA     LINEATT
-        LDA     PACTIVE
-        ORA     A
-        JZ      DPHATTR
-        MVI     A,BOLDINV
-        STA     LINEATT
-DPHATTR:MVI     B,0
+        MVI     B,0
         LDA     PCOL
         MOV     C,A
         CALL    POS
@@ -511,6 +637,15 @@ DPHUP:  CALL    PUTC
         JZ      DPHDOWN
         MVI     A,'v'
 DPHDOWN:CALL    PUTC
+        LDA     PCOL
+        ORA     A
+        JZ      DPHNOVER
+        MVI     B,0
+        MVI     C,74
+        CALL    POS
+        LXI     H,TOPVER
+        CALL    PRINTZ
+DPHNOVER:
         MVI     A,NORMATT
         CALL    SETATTR
         RET
@@ -766,12 +901,20 @@ STATUS: PUSH    H
         MVI     B,23
         MVI     C,0
         CALL    POS
-        MVI     A,1BH
+        MVI     A,INVATT
+        CALL    SETATTR
+        MVI     D,64
+STCLEAR:MVI     A,' '
         CALL    PUTC
-        MVI     A,'K'
-        CALL    PUTC
+        DCR     D
+        JNZ     STCLEAR
+        MVI     B,23
+        MVI     C,1
+        CALL    POS
         POP     H
         CALL    PRINTZ
+        MVI     A,NORMATT
+        CALL    SETATTR
         MVI     A,1
         STA     FOOTMSG
         RET
@@ -1360,8 +1503,8 @@ OVYES:  CALL    SHOWCOPY
         MVI     A,1
         RET
 
-; Four-row inverse-video copy modal. It deliberately stays clear of row 23,
-; so the keyboard legend remains visible throughout the operation.
+; Four-row inverse-video copy modal. It deliberately stays clear of rows
+; 22-23, so the two-row keyboard legend remains visible during the operation.
 MODBOX: MVI     B,9
 MBLOOP:CALL    MODROW
         INR     B
@@ -1932,8 +2075,31 @@ STARTMSG:
 WAITMSG:DB      ' - PLEASE WAIT',0
 READMSG:DB      'P2FILE: READING DRIVE ',0
 UNKSIZE:DB      '    ?',0
-HELP:   DB      'TAB PANEL  W/S MOVE  SPACE MARK  C COPY  D DELETE'
-        DB      '  R RENAME  V DRIVE  Q QUIT',0
+APPVER: DB      '0.1.0',0
+SHORTVER:
+        DB      'v0.1.0',0
+TOPVER: DB      '0.1.0',0
+APPNAME:DB      'P2FILE v0.1.0',0
+MENU1:  DB      'TAB PANEL  W/S MOVE  SPACE MARK  C COPY  D DELETE',0
+MENU2:  DB      'R RENAME  V DRIVE  H HELP  Q QUIT',0
+HELPHEAD:
+        DB      'P2FILE HELP',0
+HELPDESC:
+        DB      'Two-panel file manager for CP/M 2.2 on the Philips P2000C.',0
+HELPKEYS:
+        DB      'Keyboard',0
+HELPK1: DB      'TAB       Switch the active panel',0
+HELPK2: DB      'W/S       Move up/down       SPACE     Mark a file',0
+HELPK3: DB      'C         Copy               D         Delete',0
+HELPK4: DB      'R Rename  V Select drive     H Help    Q Quit',0
+REPOHEAD:
+        DB      'GitHub repository',0
+REPOURL:DB      'https://github.com/ifilot/p2000c-file',0
+LICHEAD:DB      'License',0
+LICTEXT:DB      'GNU General Public License version 3 (GPL-3.0)',0
+LICFILE:DB      'The complete license is in the repository LICENSE file.',0
+HELPBACK:
+        DB      'PRESS ANY KEY TO RETURN',0
 DRIVEMSG:
         DB      ' DRIVE ',0
 FILEMSG:DB      ' FILES ',0

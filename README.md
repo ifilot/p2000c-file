@@ -17,6 +17,7 @@ CP/M BDOS calls and Philips P2000C terminal controls.
 - Explicit overwrite confirmation
 - Drives A through F
 - Compact 24-row P2000C display
+- Built-in help with project and license information
 
 ## Keyboard
 
@@ -32,6 +33,7 @@ P2FILE is designed for the P2000C UK/NL keyboard table.
 | D | Delete marked files, or the current file |
 | R | Rename the current file |
 | V | Select drive A through F for the active panel |
+| H | Open the help screen |
 | Q | Return to CP/M |
 
 Copying never silently replaces a file: P2FILE asks for confirmation for each
@@ -39,29 +41,33 @@ destination filename that already exists.
 
 ## Building
 
-### Automated build and smoke test
+### Automated build
 
-The automated build uses the P2000C emulator to run the original Digital
-Research `ASM.COM` and `LOAD.COM` under CP/M. It then launches P2FILE, verifies
-that both drive panels appear, and exits cleanly before publishing the
-artifacts.
+The build uses
+[ifilot/p2000c-asm](https://github.com/ifilot/p2000c-asm), a standalone
+minimal assembler that runs the original Digital Research `ASM.COM` and
+`LOAD.COM` on an emulated Z80 without booting the P2000C emulator. The build
+then creates a deterministic CP/M floppy and verifies that extracting
+`P2FILE.COM` from it produces the original assembled bytes.
 
 Requirements:
 
 - Bash
 - Python 3
 - CMake
-- A checkout of
-  [ifilot/p2000c-emulator](https://github.com/ifilot/p2000c-emulator) containing
-  its CP/M system image and original Digital Research tools
+- A C/C++ compiler
+- A checkout of `p2000c-asm`
 
-By default, the build expects `p2000c-emulator` beside this repository:
+By default, the build expects `p2000c-asm` beside this repository:
 
 ```text
 P2000C/
-|-- p2000c-emulator/
+|-- p2000c-asm/
 `-- p2000c-file/
 ```
+
+The script uses an existing `p2000c-asm` build when available. Otherwise, it
+builds the assembler from the sibling checkout into `.cache/`.
 
 Run:
 
@@ -72,41 +78,46 @@ Run:
 For another checkout location:
 
 ```sh
-P2000C_EMULATOR_DIR=/path/to/p2000c-emulator ./scripts/build.sh
+P2000C_ASM_DIR=/path/to/p2000c-asm ./scripts/build.sh
 ```
 
-The script creates `dist/p2file.flp`, extracts `dist/P2FILE.COM`, and rewrites
-`dist/SHA256SUMS`. An existing emulator CLI can be selected with
-`P2000C_CLI=/path/to/p2000c_cli`.
+An existing assembler executable can be selected directly:
 
-### Build directly under CP/M
-
-Put `src/P2FILE.ASM`, `ASM.COM`, and `LOAD.COM` on a CP/M disk, then run:
-
-```text
-B>ASM P2FILE
-B>LOAD P2FILE
-B>P2FILE
+```sh
+P2000C_ASSEMBLER=/path/to/p2000c-asm ./scripts/build.sh
 ```
 
-`ASM` produces `P2FILE.HEX` and `P2FILE.PRN`; `LOAD` produces `P2FILE.COM`.
-The source deliberately uses CP/M CR/LF line endings and ends with a `1Ah`
-marker.
+The script creates `dist/p2file.flp`, `dist/P2FILE.COM`, `dist/SHA256SUMS`,
+and `dist/VERSION`.
 
-## Repository layout
+### Continuous integration and releases
 
-```text
-.
-|-- dist/               Ready-to-use COM file, floppy, and checksums
-|-- scripts/
-|   `-- build.sh        Emulator-driven build and smoke test
-|-- src/
-|   `-- P2FILE.ASM      Canonical Intel 8080 source
-|-- tools/
-|   `-- cpm_disk.py     Deterministic P2000C CP/M disk builder/extractor
-|-- LICENSE
-`-- README.md
+GitHub Actions builds the latest default branch of `ifilot/p2000c-asm`, runs
+its tests, and uses it to compile and package P2FILE on every push and pull
+request. Every build publishes the generated files as workflow artifacts.
+
+### Running in the graphical emulator
+
+After building P2FILE, launch it directly in the graphical emulator:
+
+```sh
+./run.sh
 ```
+
+The script assumes `p2000c-emulator` is beside this repository. It mounts the
+emulator's CP/M system disk as A:, mounts `dist/p2file.flp` as B:, and runs
+`B:P2FILE` automatically. Override the sibling checkout or GUI executable with
+`P2000C_EMULATOR_DIR` or `P2000C_GUI`.
+
+Hard disks can optionally be mounted at launch:
+
+```sh
+P2000C_HARD_DISK_0=/path/to/disk-0.hda \
+P2000C_HARD_DISK_1=/path/to/disk-1.hda \
+./run.sh
+```
+
+Additional arguments supplied to `run.sh` are passed to the emulator.
 
 ## Design
 
@@ -124,7 +135,7 @@ selecting its drive letter.
 ### Incremental file sizes
 
 Both panels appear immediately with `?K` placeholders. Exact sizes are then
-resolved and cached one visible row at a time. Only the 22 on-screen rows are
+resolved and cached one visible row at a time. Only the 21 on-screen rows are
 considered. Scrolling resolves newly exposed rows while retaining cached sizes
 for rows that remain visible.
 
@@ -141,7 +152,8 @@ it refreshes after every 4 KiB batch and at end-of-file.
 Panel headers and the active panel's current row use inverse video. Ordinary
 cursor movement updates only the old row, new row, and changing header fields.
 Crossing a window boundary redraws only that panel's file rows. The compact
-24-row layout provides 22 file rows and keeps the key table on the bottom row.
+24-row layout provides 21 file rows and reserves the bottom two rows for the
+key table, status messages, and application version.
 
 ## Emulator integration
 

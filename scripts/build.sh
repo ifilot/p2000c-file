@@ -4,44 +4,73 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/.." && pwd)"
-emulator_root=${P2000C_EMULATOR_DIR:-"${repo_root}/../p2000c-emulator"}
+assembler_root=${P2000C_ASM_DIR:-"${repo_root}/../p2000c-asm"}
 output=${1:-"${repo_root}/dist/p2file.flp"}
 com_output="$(dirname -- "${output}")/P2FILE.COM"
 
-build_dir="${emulator_root}/build"
-cli=${P2000C_CLI:-}
-ipl="${emulator_root}/tools/ipldump/IPLDUMP.BIN"
-system_disk="${emulator_root}/images/cpm/system.flp"
-asm_com="${emulator_root}/media/files/core/ASM.COM"
-load_com="${emulator_root}/media/files/core/LOAD.COM"
+assembler=${P2000C_ASSEMBLER:-}
+fallback_build_dir="${repo_root}/.cache/p2000c-asm-build"
 source_asm="${repo_root}/src/P2FILE.ASM"
 cpm_tool="${repo_root}/tools/cpm_disk.py"
+version_file="${repo_root}/VERSION"
 
-find_cli() {
+version="$(tr -d '[:space:]' <"${version_file}")"
+if [[ ! "${version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+  printf 'VERSION is not a semantic version: %s\n' "${version}" >&2
+  exit 1
+fi
+if ((${#version} > 6)); then
+  printf 'VERSION is too long for the fixed 80-column app layout: %s\n' \
+    "${version}" >&2
+  exit 1
+fi
+for embedded_version in \
+  "APPVER: DB      '${version}',0" \
+  "DB      'v${version}',0" \
+  "TOPVER: DB      '${version}',0" \
+  "APPNAME:DB      'P2FILE v${version}',0"; do
+  if ! grep -Fq "${embedded_version}" "${source_asm}"; then
+    printf 'App version in %s does not match VERSION (%s).\n' \
+      "${source_asm}" "${version}" >&2
+    exit 1
+  fi
+done
+
+find_assembler() {
   local candidate
   for candidate in \
-    "${build_dir}/p2000c_cli" \
-    "${build_dir}/p2000c_cli.exe" \
-    "${build_dir}/Release/p2000c_cli.exe"; do
+    "${assembler_root}/build/p2000c-asm" \
+    "${assembler_root}/build/p2000c-asm.exe" \
+    "${assembler_root}/build/Release/p2000c-asm.exe" \
+    "${fallback_build_dir}/p2000c-asm" \
+    "${fallback_build_dir}/p2000c-asm.exe" \
+    "${fallback_build_dir}/Release/p2000c-asm.exe"; do
     if [[ -x "${candidate}" ]]; then
-      cli=${candidate}
+      assembler=${candidate}
       return 0
     fi
   done
   return 1
 }
 
-if [[ -z "${cli}" ]] && ! find_cli; then
-  if [[ ! -f "${build_dir}/CMakeCache.txt" ]]; then
-    cmake -S "${emulator_root}" -B "${build_dir}" -DP2000C_BUILD_APP=OFF
+if [[ -z "${assembler}" ]] && ! find_assembler; then
+  if [[ ! -f "${assembler_root}/CMakeLists.txt" ]]; then
+    printf 'p2000c-asm source not found at %s.\n' "${assembler_root}" >&2
+    printf 'Set P2000C_ASM_DIR or P2000C_ASSEMBLER to override it.\n' >&2
+    exit 1
   fi
-  cmake --build "${build_dir}" --target p2000c_cli --config Release
-  find_cli || true
+  cmake -S "${assembler_root}" -B "${fallback_build_dir}" \
+    -DCMAKE_BUILD_TYPE=Release
+  cmake --build "${fallback_build_dir}" --target p2000c-asm --config Release
+  find_assembler || true
 fi
 
-for required_file in \
-  "${cli}" "${ipl}" "${system_disk}" "${asm_com}" "${load_com}" \
-  "${source_asm}" "${cpm_tool}"; do
+if [[ ! -x "${assembler}" ]]; then
+  printf 'Assembler is not executable: %s\n' "${assembler}" >&2
+  exit 1
+fi
+
+for required_file in "${source_asm}" "${cpm_tool}"; do
   if [[ ! -f "${required_file}" ]]; then
     printf 'Missing required file: %s\n' "${required_file}" >&2
     exit 1
@@ -51,55 +80,37 @@ done
 work_dir="$(mktemp -d)"
 trap 'rm -rf -- "${work_dir}"' EXIT
 work_disk="${work_dir}/p2file.flp"
-build_log="${work_dir}/p2file-build.log"
-extracted_com="${work_dir}/P2FILE.COM"
+compiled_com="${work_dir}/P2FILE.COM"
+extracted_com="${work_dir}/extracted-P2FILE.COM"
 
-python3 "${cpm_tool}" build "${work_disk}" \
-  "${asm_com}" "${load_com}" "${source_asm}"
-
-if ! "${cli}" \
-  --ipl "${ipl}" \
-  --floppy-a "${system_disk}" \
-  --floppy-b "${work_disk}" \
-  --write-through \
-  --fast-storage \
-  --wait-cycles 1000000000 \
-  --wait-for 'A>' \
-  --send 'B:\rASM P2FILE\r' \
-  --wait-for 'END OF ASSEMBLY' \
-  --run 5000000 \
-  --send 'LOAD P2FILE\r' \
-  --wait-for 'FIRST ADDRESS' \
-  --run 5000000 \
-  --send 'P2FILE\r' \
-  --wait-for 'P2FILE: READING DRIVE A:' \
-  --wait-for 'P2FILE: READING DRIVE B:' \
-  --run 20000000 \
-  --wait-for 'DRIVE B:    6 FILES' \
-  --wait-for 'Q QUIT' \
-  --wait-for 'P2FILE  .COM     5K' \
-  --send 'Q' \
-  --wait-for 'P2FILE finished.' \
-  --wait-for 'B>' \
-  --output text >"${build_log}" 2>&1; then
-  printf 'P2000C File build or smoke test failed. Emulator output follows:\n' >&2
-  sed -n '1,260p' "${build_log}" >&2
+if ! "${assembler}" -o "${compiled_com}" "${source_asm}"; then
+  printf 'P2FILE assembly failed.\n' >&2
   exit 1
 fi
 
+python3 "${cpm_tool}" build "${work_disk}" "${compiled_com}"
 python3 "${cpm_tool}" extract "${work_disk}" P2FILE.COM "${extracted_com}"
+if ! cmp -s "${compiled_com}" "${extracted_com}"; then
+  printf 'P2FILE.COM changed while packaging the floppy image.\n' >&2
+  exit 1
+fi
+
 mkdir -p -- "$(dirname -- "${output}")" "$(dirname -- "${com_output}")"
 cp -- "${work_disk}" "${output}"
-cp -- "${extracted_com}" "${com_output}"
+cp -- "${compiled_com}" "${com_output}"
+cp -- "${version_file}" "$(dirname -- "${output}")/VERSION"
 
 manifest="$(dirname -- "${output}")/SHA256SUMS"
 image_hash="$(sha256sum "${output}")"
 com_hash="$(sha256sum "${com_output}")"
+version_hash="$(sha256sum "$(dirname -- "${output}")/VERSION")"
 {
   printf '%s  %s\n' "${image_hash%% *}" "$(basename -- "${output}")"
   printf '%s  %s\n' "${com_hash%% *}" "$(basename -- "${com_output}")"
+  printf '%s  VERSION\n' "${version_hash%% *}"
 } >"${manifest}"
 
 printf 'Created %s\n' "${output}"
 printf 'Created %s\n' "${com_output}"
-printf 'Smoke tests: CP/M assembly, load, startup, both drive panels, clean exit\n'
+printf 'Version %s\n' "${version}"
+printf 'Checks: standalone assembly, floppy packaging, extracted COM match\n'
