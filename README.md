@@ -1,5 +1,9 @@
 # P2000C File Manager
 
+[![Build and release](https://github.com/ifilot/p2000c-file/actions/workflows/build.yml/badge.svg)](https://github.com/ifilot/p2000c-file/actions/workflows/build.yml)
+[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-blue.svg)](VERSION)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+
 P2000C File Manager is a compact two-panel file manager for CP/M 2.2 on the
 Philips P2000C. The executable is named `P2FILE.COM` to fit CP/M's 8.3
 filenames.

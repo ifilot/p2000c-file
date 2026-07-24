@@ -48,7 +48,7 @@ jobs:
       - name: Assemble and package P2FILE
         env:
           P2000C_ASSEMBLER: ${{ github.workspace }}/p2000c-asm/build/p2000c-asm
-        run: ./scripts/build.sh
+        run: bash ./scripts/build.sh
 
       - name: Verify release artifacts
         working-directory: dist
