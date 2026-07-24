@@ -11,6 +11,8 @@ filenames.
 P2FILE is written entirely in Intel 8080 assembly and uses only documented
 CP/M BDOS calls and Philips P2000C terminal controls.
 
+![P2FILE running in the Philips P2000C Emulator](screenshots/p2file.png)
+
 ## Highlights
 
 - Two independently selectable drive panels
