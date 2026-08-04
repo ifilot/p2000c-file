@@ -94,6 +94,18 @@ class SourceTests(unittest.TestCase):
                 self.assertIn(f"MVI     A,{glyph}", modal)
         self.assertEqual(source.count("CALL    MODBOX"), 5)
 
+    def test_navigation_accepts_canonical_and_legacy_cursor_codes(self) -> None:
+        source = ASM_SOURCE.read_text(encoding="ascii", errors="ignore")
+        self.assertIn("CURUP   EQU     1AH", source)
+        self.assertIn("CURDOWN EQU     0AH", source)
+        self.assertIn("OLDUP   EQU     05H", source)
+        self.assertIn("OLDDOWN EQU     18H", source)
+        key_dispatch = source.split("KEYUP:", 1)[1].split("KTAB:", 1)[0]
+        self.assertIn("CPI     CURUP\n        JZ      KUP", key_dispatch)
+        self.assertIn("CPI     CURDOWN\n        JZ      KDOWN", key_dispatch)
+        self.assertIn("CPI     OLDUP\n        JZ      KUP", key_dispatch)
+        self.assertIn("CPI     OLDDOWN\n        JZ      KDOWN", key_dispatch)
+
     def test_embedded_versions_match_version_file(self) -> None:
         source = ASM_SOURCE.read_text(encoding="ascii", errors="ignore")
         for declaration in (
@@ -333,6 +345,30 @@ class EmulatorIntegrationTests(unittest.TestCase):
         )
         self.assert_modal_outline(result)
         self.assertIn("SELECT DRIVE", self.screen(result))
+
+    def test_canonical_cursor_control_codes_navigate_file_list(self) -> None:
+        disk = self.make_disk("cursor-keys.flp", [self.program])
+        moved_down = self.run_app(
+            disk,
+            "--send",
+            "\\x0a",
+            "--run",
+            "20000000",
+        )
+        self.assertIn("DRIVE A:   16 FILES   2/ 16", self.screen(moved_down))
+
+        moved_up = self.run_app(
+            disk,
+            "--send",
+            "S",
+            "--run",
+            "20000000",
+            "--send",
+            "\\x1a",
+            "--run",
+            "20000000",
+        )
+        self.assertIn("DRIVE A:   16 FILES   1/ 16", self.screen(moved_up))
 
     def test_catalog_accepts_all_128_directory_entries(self) -> None:
         files = [self.program]

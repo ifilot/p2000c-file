@@ -37,6 +37,10 @@ CACHEBY EQU     MAXFILE*CENTSIZ
 NORMATT EQU     40H
 INVATT  EQU     50H
 CPBUFR  EQU     32
+CURUP   EQU     1AH
+CURDOWN EQU     0AH
+OLDUP   EQU     05H
+OLDDOWN EQU     18H
 
 ; Teletext proxy codes for 2x3 mosaic glyphs used by modal outlines. ESC 1
 ; maps 20H-3FH to glyphs 00H-1FH and 60H-7FH to glyphs 80H-9FH.
@@ -88,9 +92,13 @@ KEYLOAD:LDA     KEYTMP
         SUI     20H
 KEYUP:  CPI     09H
         JZ      KTAB
-        CPI     05H
+        CPI     CURUP
         JZ      KUP
-        CPI     18H
+        CPI     CURDOWN
+        JZ      KDOWN
+        CPI     OLDUP
+        JZ      KUP
+        CPI     OLDDOWN
         JZ      KDOWN
         CPI     'W'
         JZ      KUP

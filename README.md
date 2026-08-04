@@ -32,7 +32,8 @@ P2FILE is designed for the P2000C UK/NL keyboard table.
 | Key | Action |
 | --- | --- |
 | Tab | Activate the other panel |
-| UK/NL cursor Up / Down (`05h` / `18h`) | Move the cursor |
+| Cursor Up / Down (`1Ah` / `0Ah`) | Move the cursor |
+| Legacy cursor aliases (`05h` / `18h`) | Move the cursor |
 | W / S | Compatibility aliases for moving up or down |
 | Space | Mark or unmark a file |
 | C | Copy marked files, or the current file |
@@ -171,7 +172,7 @@ invalidates the affected catalog after copy, delete, or rename; A: and B: are
 also refreshed when explicitly selected so changed removable media is seen.
 
 The complete runtime image, including all six catalogs, two panel work arrays,
-the existing 4 KiB copy buffer, DMA buffer, and stack, ends at `6351h`. Against
+the existing 4 KiB copy buffer, DMA buffer, and stack, ends at `635Bh`. Against
 the conservative `E000h` start used by the supported CP/M 2.2 system, more than
 31 KiB remains for CP/M and safety headroom.
 

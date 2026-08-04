@@ -17,6 +17,8 @@ All notable changes to P2FILE are documented here. The project follows
   rename is being entered, and restore it before returning to CP/M.
 - Replace inverse-filled modal dialogs with normal-video dialogs outlined by
   the P2000C character generator's 2x3 mosaic glyphs.
+- Support the P2000C cursor Up and Down control codes emitted by the emulator,
+  while retaining W/S and the previous control-code aliases.
 
 ## [0.1.0]
 
