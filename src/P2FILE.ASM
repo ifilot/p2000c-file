@@ -19,17 +19,21 @@ CLOSEF  EQU     10H
 SFIRST  EQU     11H
 SNEXT   EQU     12H
 DELETE  EQU     13H
+SELDSK  EQU     0EH
 READSEQ EQU     14H
 WRITSEQ EQU     15H
 MAKEF   EQU     16H
 RENAME  EQU     17H
+CURDSK  EQU     19H
 SETDMA  EQU     1AH
-FSIZE   EQU     23H
+USERNO  EQU     20H
 
 MAXFILE EQU     128
 ROWS    EQU     21
 FIRST   EQU     1
 ENTSIZ  EQU     15
+CENTSIZ EQU     14
+CACHEBY EQU     MAXFILE*CENTSIZ
 NORMATT EQU     40H
 INVATT  EQU     50H
 CPBUFR  EQU     32
@@ -37,6 +41,8 @@ CPBUFR  EQU     32
         ORG     0100H
 
 START:  LXI     SP,STACK
+        CALL    CURSOFF
+        CALL    INITCACHE
         LDA     LDRIVE
         CALL    SHOWSTART
         CALL    LOADL
@@ -44,6 +50,9 @@ START:  LXI     SP,STACK
         LDA     RDRIVE
         CALL    SHOWREAD
         CALL    LOADR
+        CALL    DRAWR
+        CALL    DRAWFOOT
+        JMP     KEYLOOP
 
 MAIN:   CALL    DRAW
 KEYLOOP:CALL    GETKEY
@@ -135,7 +144,8 @@ KHELP: CALL    SHOWHELP
         CALL    GETKEY
         JMP     MAIN
 
-KQUIT:  MVI     A,0CH
+KQUIT:  CALL    CURSON
+        MVI     A,0CH
         CALL    PUTC
         LXI     H,BYEMSG
         CALL    PRINTZ
@@ -145,48 +155,118 @@ KQUIT:  MVI     A,0CH
 ; Directory loading
 
 LOADL:  LDA     LDRIVE
-        STA     SRCHFCB
+        CALL    ENSUREDR
         LXI     H,LFILES
         SHLD    STOREPTR
         LXI     H,LCOUNT
         SHLD    CNTPTR
-        CALL    READDIR
+        CALL    COPYPANEL
         CALL    NORML
         RET
 
 LOADR:  LDA     RDRIVE
-        STA     SRCHFCB
+        CALL    ENSUREDR
         LXI     H,RFILES
         SHLD    STOREPTR
         LXI     H,RCOUNT
         SHLD    CNTPTR
-        CALL    READDIR
+        CALL    COPYPANEL
         CALL    NORMR
         RET
 
-READDIR:
-        LXI     H,SRCHFCB+1
-        MVI     B,11
-RDFILL: MVI     M,'?'
-        INX     H
-        DCR     B
-        JNZ     RDFILL
-        MVI     B,24
+; Each drive owns one compact filename/size catalog. Panels copy that catalog
+; into their working arrays so marks remain independent when both panels show
+; the same drive. A catalog is populated by one raw directory scan and reused
+; until P2FILE changes the drive or removable media is explicitly selected.
+INITCACHE:
+        LXI     H,DVALID
+        MVI     B,12
         XRA     A
-RDZERO: MOV     M,A
+ICZERO: MOV     M,A
         INX     H
         DCR     B
-        JNZ     RDZERO
-        LHLD    CNTPTR
+        JNZ     ICZERO
+        RET
+
+; A is the CP/M drive number, 1 through 6. Return with CACHEPTR and CACHECOUNT
+; selecting its compact catalog, loading it from disk only when invalid.
+ENSUREDR:
+        STA     CACHEDRV
+        DCR     A
+        STA     CACHEIDX
+        LXI     H,DCACHES
+        ORA     A
+        JZ      EDCBASE
+        MOV     B,A
+        LXI     D,CACHEBY
+EDCADV: DAD     D
+        DCR     B
+        JNZ     EDCADV
+EDCBASE:SHLD    CACHEPTR
+        LDA     CACHEIDX
+        MOV     E,A
+        MVI     D,0
+        LXI     H,DVALID
+        DAD     D
+        MOV     A,M
+        ORA     A
+        CZ      SCANDIR
+        LDA     CACHEIDX
+        MOV     E,A
+        MVI     D,0
+        LXI     H,DCOUNTS
+        DAD     D
+        MOV     A,M
+        STA     CACHECOUNT
+        RET
+
+; Invalidate the compact catalog for drive A (1 through 6).
+INVALIDATE:
+        DCR     A
+        MOV     E,A
+        MVI     D,0
+        LXI     H,DVALID
+        DAD     D
         MVI     M,0
+        RET
+
+; Scan every raw directory entry exactly once. Drive '?' asks documented CP/M
+; Search First/Next to return allocated, free, and all-user entries from the
+; already selected default drive. Only the current user's allocated entries
+; are aggregated. HASHBUF maps filenames to compact catalog indices.
+SCANDIR:
+        XRA     A
+        STA     CACHECOUNT
+        LXI     H,HASHBUF
+        MVI     B,0
+SDHASH: MOV     M,A
+        INX     H
+        DCR     B
+        JNZ     SDHASH
+        MVI     E,0FFH
+        MVI     C,USERNO
+        CALL    BDOS
+        STA     CURUSER
+        MVI     C,CURDSK
+        CALL    BDOS
+        STA     OLDDISK
+        LDA     CACHEDRV
+        DCR     A
+        MOV     E,A
+        MVI     C,SELDSK
+        CALL    BDOS
         LXI     D,DIRBUF
         MVI     C,SETDMA
         CALL    BDOS
+        LXI     H,SRCHFCB
+        CALL    CLEAR36
+        MVI     A,'?'
+        STA     SRCHFCB
         LXI     D,SRCHFCB
         MVI     C,SFIRST
         CALL    BDOS
-RDLOOP: CPI     0FFH
-        JZ      RDDONE
+SDLOOP: CPI     0FFH
+        JZ      SDDONE
         ANI     03H
         RLC
         RLC
@@ -197,80 +277,250 @@ RDLOOP: CPI     0FFH
         MVI     D,0
         LXI     H,DIRBUF
         DAD     D
-        INX     H
-        SHLD    DIRPTR
-        LHLD    DIRPTR
-        XCHG
-        LHLD    STOREPTR
-        MVI     B,11
-RDCOPY: LDAX    D
-        ANI     7FH
-        MOV     M,A
-        INX     D
-        INX     H
-        DCR     B
-        JNZ     RDCOPY
-        MVI     M,0
-        INX     H
-        MVI     M,0
-        INX     H
-        MVI     M,0
-        INX     H
-        MVI     M,0FFH
-        INX     H
-        SHLD    STOREPTR
-        LHLD    CNTPTR
-        INR     M
+        SHLD    RAWPTR
         MOV     A,M
-        CPI     MAXFILE
-        JZ      RDDONE
+        MOV     B,A
+        LDA     CURUSER
+        CMP     B
+        JNZ     SDNEXT
+        CALL    CACHEENT
+SDNEXT:
         LXI     D,SRCHFCB
         MVI     C,SNEXT
         CALL    BDOS
-        JMP     RDLOOP
+        JMP     SDLOOP
+SDDONE:LDA     OLDDISK
+        MOV     E,A
+        MVI     C,SELDSK
+        CALL    BDOS
+        LDA     CACHEIDX
+        MOV     E,A
+        MVI     D,0
+        LXI     H,DCOUNTS
+        DAD     D
+        LDA     CACHECOUNT
+        MOV     M,A
+        LDA     CACHEIDX
+        MOV     E,A
+        MVI     D,0
+        LXI     H,DVALID
+        DAD     D
+        MVI     M,1
+        RET
 
-RDDONE: RET
+; Hash and aggregate the raw directory entry at RAWPTR.
+CACHEENT:
+        LHLD    RAWPTR
+        INX     H
+        MVI     B,11
+        MVI     C,0
+CEHASH: MOV     A,M
+        ANI     7FH
+        ADD     C
+        MOV     C,A
+        INX     H
+        DCR     B
+        JNZ     CEHASH
+        MOV     A,C
+        STA     HASHIDX
+CEPROBE:
+        LDA     HASHIDX
+        MOV     E,A
+        MVI     D,0
+        LXI     H,HASHBUF
+        DAD     D
+        MOV     A,M
+        ORA     A
+        JZ      CENEW
+        DCR     A
+        CALL    CENTRY
+        SHLD    MATCHPTR
+        XCHG
+        LHLD    RAWPTR
+        INX     H
+        MVI     B,11
+CECMP:  MOV     A,M
+        ANI     7FH
+        MOV     C,A
+        LDAX    D
+        CMP     C
+        JNZ     CECOLL
+        INX     H
+        INX     D
+        DCR     B
+        JNZ     CECMP
+        LHLD    MATCHPTR
+        LXI     D,11
+        DAD     D
+        JMP     CEUPD
+CECOLL: LDA     HASHIDX
+        INR     A
+        STA     HASHIDX
+        JMP     CEPROBE
+CENEW: LDA     CACHECOUNT
+        CPI     MAXFILE
+        RZ
+        MOV     B,A
+        CALL    CENTRY
+        XCHG
+        LHLD    RAWPTR
+        INX     H
+        MVI     C,11
+CECOPY: MOV     A,M
+        ANI     7FH
+        STAX    D
+        INX     H
+        INX     D
+        DCR     C
+        JNZ     CECOPY
+        XRA     A
+        STAX    D
+        INX     D
+        STAX    D
+        INX     D
+        STAX    D
+        MOV     H,D
+        MOV     L,E
+        DCX     H
+        DCX     H
+        LDA     CACHECOUNT
+        INR     A
+        STA     CACHECOUNT
+        MOV     C,A
+        LDA     HASHIDX
+        MOV     E,A
+        MVI     D,0
+        PUSH    H
+        LXI     H,HASHBUF
+        DAD     D
+        MOV     M,C
+        POP     H
+CEUPD:  SHLD    MATCHPTR
+        CALL    CALCSIZE
+        LHLD    MATCHPTR
+        INX     H
+        INX     H
+        LDA     CANDHI
+        CMP     M
+        JC      CENKEEP
+        JNZ     CESTORE2
+        DCX     H
+        LDA     CANDMID
+        CMP     M
+        JC      CENKEEP
+        JNZ     CESTORE1
+        DCX     H
+        LDA     CANDLOW
+        CMP     M
+        JC      CENKEEP
+        JMP     CESTORE0
+CESTORE2:
+        DCX     H
+CESTORE1:
+        DCX     H
+CESTORE0:
+        LDA     CANDLOW
+        MOV     M,A
+        INX     H
+        LDA     CANDMID
+        MOV     M,A
+        INX     H
+        LDA     CANDHI
+        MOV     M,A
+CENKEEP:RET
 
-; Resolve an entry's size only when its row becomes active. Byte 14 of the
-; panel entry is FFH until BDOS function 35 has populated bytes 12-14.
-ENSURESIZE:
-        LDA     LINEIDX
-        CALL    PENTRY
-        SHLD    ENTRYPTR
+; Convert EX/S2/RC in RAWPTR to the three-byte virtual ending record.
+CALCSIZE:
+        LHLD    RAWPTR
+        LXI     D,15
+        DAD     D
+        MOV     C,M
+        LHLD    RAWPTR
+        LXI     D,12
+        DAD     D
+        MOV     A,M
+        STA     EXTEMP
+        RRC
+        ANI     80H
+        ADD     C
+        MOV     C,A
+        MVI     B,0
+        MVI     A,0
+        ADC     B
+        MOV     B,A
+        LDA     EXTEMP
+        RRC
+        ANI     0FH
+        ADD     B
+        MOV     B,A
+        LHLD    RAWPTR
         LXI     D,14
         DAD     D
         MOV     A,M
-        CPI     0FFH
-        RNZ
-        LXI     H,SRCFCB
-        CALL    CLEAR36
-        LDA     PDRIVE
-        STA     SRCFCB
-        LHLD    ENTRYPTR
+        ANI     0FH
+        RLC
+        RLC
+        RLC
+        RLC
+        ADD     B
+        MOV     B,A
+        MVI     A,0
+        ACI     0
+        STA     CANDHI
+        MOV     A,B
+        STA     CANDMID
+        MOV     A,C
+        STA     CANDLOW
+        RET
+
+; A is a compact-catalog index. Return CACHEPTR + A*CENTSIZ in HL.
+CENTRY: LHLD    CACHEPTR
+        ORA     A
+        RZ
+        MOV     B,A
+        LXI     D,CENTSIZ
+CEADV:  DAD     D
+        DCR     B
+        JNZ     CEADV
+        RET
+
+; Copy the selected compact catalog to a panel working array, clearing marks.
+COPYPANEL:
+        LHLD    CNTPTR
+        LDA     CACHECOUNT
+        MOV     M,A
+        STA     COPYLEFT
+        LHLD    CACHEPTR
+        SHLD    COPYSRCP
+CPNLOOP:LDA     COPYLEFT
+        ORA     A
+        RZ
+        LHLD    COPYSRCP
         XCHG
-        LXI     H,SRCFCB+1
+        LHLD    STOREPTR
         MVI     B,11
-RDSZCP: LDAX    D
+CPNNAME:LDAX    D
         MOV     M,A
         INX     D
         INX     H
         DCR     B
-        JNZ     RDSZCP
-        LXI     D,SRCFCB
-        MVI     C,FSIZE
-        CALL    BDOS
-        LHLD    ENTRYPTR
-        LXI     D,12
-        DAD     D
-        LDA     SRCFCB+33
-        MOV     M,A
+        JNZ     CPNNAME
+        MVI     M,0
         INX     H
-        LDA     SRCFCB+34
+        MVI     B,3
+CPNSIZE:LDAX    D
         MOV     M,A
+        INX     D
         INX     H
-        LDA     SRCFCB+35
-        MOV     M,A
-        RET
+        DCR     B
+        JNZ     CPNSIZE
+        SHLD    STOREPTR
+        XCHG
+        SHLD    COPYSRCP
+        LDA     COPYLEFT
+        DCR     A
+        STA     COPYLEFT
+        JMP     CPNLOOP
 
 NORML:  LDA     LCOUNT
         MOV     B,A
@@ -318,7 +568,6 @@ NORMZERO:
 ; Screen drawing
 
 DRAW:   CALL    DRAWSHELL
-        CALL    FILLSIZES
         RET
 
 DRAWSHELL:
@@ -330,58 +579,6 @@ DRAWSHELL:
         CALL    DRAWR
         CALL    DRAWFOOT
         RET
-
-; Populate exact sizes only for the two visible windows. The initial panel
-; drawing therefore appears immediately, followed by one visibly updated row
-; per BDOS function-35 query. Cached rows are skipped on later redraws.
-FILLSIZES:
-        CALL    SETL
-        CALL    FILLPANEL
-        CALL    SETR
-        CALL    FILLPANEL
-        RET
-
-FILLPANEL:
-        LDA     PTOP
-        STA     SZIDX
-        MVI     A,ROWS
-        STA     SZLEFT
-FZLOOP: LDA     SZLEFT
-        ORA     A
-        RZ
-        LDA     SZIDX
-        MOV     B,A
-        LDA     PCOUNT
-        CMP     B
-        RC
-        RZ
-        MOV     A,B
-        CALL    PENTRY
-        LXI     D,14
-        DAD     D
-        MOV     A,M
-        CPI     0FFH
-        JNZ     FZNEXT
-        LDA     SZIDX
-        STA     LINEIDX
-        CALL    ENSURESIZE
-        LDA     SZIDX
-        STA     DRAWIDX
-        MOV     B,A
-        LDA     PTOP
-        MOV     C,A
-        MOV     A,B
-        SUB     C
-        ADI     FIRST
-        STA     DRAWROW
-        CALL    DRAWLINE
-FZNEXT: LDA     SZIDX
-        INR     A
-        STA     SZIDX
-        LDA     SZLEFT
-        DCR     A
-        STA     SZLEFT
-        JMP     FZLOOP
 
 DRAWFOOT:
         MVI     B,22
@@ -959,7 +1156,6 @@ NAVCHG:CALL    DRAWHDR
         CMP     B
         JZ      NAVROWS
         CALL    DRAWROWS
-        CALL    FILLPANEL
         RET
 NAVROWS:
         LDA     OLDCUR
@@ -1132,6 +1328,13 @@ PDUP:   CPI     'A'
         PUSH    B
         CALL    SHOWREAD
         POP     B
+        MOV     A,B
+        CPI     3
+        JNC     PDCACHED
+        PUSH    B
+        CALL    INVALIDATE
+        POP     B
+PDCACHED:
         LDA     ACTIVE
         ORA     A
         JNZ     PDRIGHT
@@ -1229,7 +1432,9 @@ CPNEXT: LDA     LOOPIDX
         INR     A
         STA     LOOPIDX
         JMP     CPLOOP
-CPDONE: CALL    LOADL
+CPDONE: LDA     DSTDRIVE
+        CALL    INVALIDATE
+        CALL    LOADL
         CALL    LOADR
         CALL    DRAW
         LDA     OPERROR
@@ -1324,31 +1529,9 @@ CCNEXT: LDA     LOOPIDX
 SENTRY: LHLD    SLIST
         JMP     ENTRYA
 
-; Cache the selected file's exact record count and initialise its individual
-; copy-progress counter. P2000C logical volumes fit in the displayed 16 bits.
+; The compact drive catalog already holds the selected file's exact virtual
+; record count. Initialise its individual copy-progress counter from that cache.
 PREPCOPY:
-        LHLD    ENTRYPTR
-        LXI     D,14
-        DAD     D
-        MOV     A,M
-        CPI     0FFH
-        JNZ     CPPKNOWN
-        CALL    BUILDSRC
-        LXI     D,SRCFCB
-        MVI     C,FSIZE
-        CALL    BDOS
-        LHLD    ENTRYPTR
-        LXI     D,12
-        DAD     D
-        LDA     SRCFCB+33
-        MOV     M,A
-        INX     H
-        LDA     SRCFCB+34
-        MOV     M,A
-        INX     H
-        LDA     SRCFCB+35
-        MOV     M,A
-CPPKNOWN:
         LHLD    ENTRYPTR
         LXI     D,12
         DAD     D
@@ -1687,7 +1870,9 @@ DELNEXT:LDA     LOOPIDX
         INR     A
         STA     LOOPIDX
         JMP     DELLOOP
-DELDONE:CALL    LOADL
+DELDONE:LDA     SRCDRIVE
+        CALL    INVALIDATE
+        CALL    LOADL
         CALL    LOADR
         CALL    DRAW
         LDA     OPERROR
@@ -1757,6 +1942,8 @@ RENDO:  CALL    BUILDREN
         JNZ     RENRES
         LXI     H,RENERR
 RENRES: PUSH    H
+        LDA     SRCDRIVE
+        CALL    INVALIDATE
         CALL    LOADL
         CALL    LOADR
         CALL    DRAW
@@ -1774,6 +1961,7 @@ GETNEW: LXI     H,NEWBUF
         STA     INLEN
         LXI     H,NEWASK
         CALL    STATUS
+        CALL    CURSON
 GNKEY:  CALL    GETKEY
         CPI     1BH
         JZ      GNCANCEL
@@ -1824,9 +2012,11 @@ GNBACK: LDA     INLEN
         MVI     A,08H
         CALL    PUTC
         JMP     GNKEY
-GNDONE: CALL    PARSENEW
+GNDONE: CALL    CURSOFF
+        CALL    PARSENEW
         RET
 GNCANCEL:
+        CALL    CURSOFF
         XRA     A
         RET
 
@@ -1959,6 +2149,18 @@ BRCOPY: MOV     A,M
 ; ---------------------------------------------------------------------------
 ; Common helpers
 
+; P2FILE draws its own selection indicator, so the terminal's blinking cursor
+; remains hidden while the application is active. Restore it before warm boot.
+CURSOFF:MVI     A,1BH
+        CALL    PUTC
+        MVI     A,'c'
+        JMP     PUTC
+
+CURSON: MVI     A,1BH
+        CALL    PUTC
+        MVI     A,'C'
+        JMP     PUTC
+
 YESNO:  CALL    GETKEY
         CPI     'a'
         JC      YNUP
@@ -2075,11 +2277,11 @@ STARTMSG:
 WAITMSG:DB      ' - PLEASE WAIT',0
 READMSG:DB      'P2FILE: READING DRIVE ',0
 UNKSIZE:DB      '    ?',0
-APPVER: DB      '0.1.0',0
+APPVER: DB      '0.2.0',0
 SHORTVER:
-        DB      'v0.1.0',0
-TOPVER: DB      '0.1.0',0
-APPNAME:DB      'P2FILE v0.1.0',0
+        DB      'v0.2.0',0
+TOPVER: DB      '0.2.0',0
+APPNAME:DB      'P2FILE v0.2.0',0
 MENU1:  DB      'TAB PANEL  W/S MOVE  SPACE MARK  C COPY  D DELETE',0
 MENU2:  DB      'R RENAME  V DRIVE  H HELP  Q QUIT',0
 HELPHEAD:
@@ -2176,8 +2378,20 @@ MODROWNO:
         DB      0
 INLEN:  DB      0
 LEAD:   DB      0
-SZIDX:  DB      0
-SZLEFT:
+CACHEDRV:
+        DB      0
+CACHEIDX:
+        DB      0
+CACHECOUNT:
+        DB      0
+CURUSER:DB      0
+OLDDISK:DB      0
+HASHIDX:DB      0
+EXTEMP: DB      0
+CANDLOW:DB      0
+CANDMID:DB      0
+CANDHI:DB       0
+COPYLEFT:
         DB      0
 CPBCOUNT:
         DB      0
@@ -2192,8 +2406,14 @@ WORKLIST:
 STOREPTR:
         DW      0
 CNTPTR: DW      0
-DIRPTR: DW      0
 ENTRYPTR:
+        DW      0
+CACHEPTR:
+        DW      0
+RAWPTR: DW      0
+MATCHPTR:
+        DW      0
+COPYSRCP:
         DW      0
 INPTR:  DW      0
 CPTOTREC:
@@ -2210,6 +2430,10 @@ NEWNAME:DS      11
 NEWBUF: DS      13
 LFILES:DS      MAXFILE*ENTSIZ
 RFILES:DS      MAXFILE*ENTSIZ
+DVALID:DS      6
+DCOUNTS:DS     6
+DCACHES:DS     6*CACHEBY
+HASHBUF:DS     256
 DIRBUF: DS      128
 BUFFER: DS      CPBUFR*128
 

@@ -1,7 +1,7 @@
 # P2000C File Manager
 
 [![Build and release](https://github.com/ifilot/p2000c-file/actions/workflows/build.yml/badge.svg)](https://github.com/ifilot/p2000c-file/actions/workflows/build.yml)
-[![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-blue.svg)](VERSION)
+[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-blue.svg)](VERSION)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
 P2000C File Manager is a compact two-panel file manager for CP/M 2.2 on the
@@ -16,7 +16,7 @@ CP/M BDOS calls and Philips P2000C terminal controls.
 ## Highlights
 
 - Two independently selectable drive panels
-- Incrementally resolved file sizes for the visible rows
+- Single-pass file-size calculation with per-drive directory caches
 - Multi-file marking, copying, deleting, and renaming
 - Per-file and overall copy progress
 - Buffered 4 KiB disk-to-disk transfers
@@ -96,6 +96,23 @@ P2000C_ASSEMBLER=/path/to/p2000c-asm ./scripts/build.sh
 The script creates `dist/p2file.flp`, `dist/P2FILE.COM`, `dist/SHA256SUMS`,
 and `dist/VERSION`.
 
+### Testing
+
+The maintainable test entry point is written in Python and uses only the
+standard library:
+
+```sh
+python3 scripts/test.py
+```
+
+It always tests the floppy-image tooling. When `p2000c-asm` is available it
+also assembles the application and checks its memory headroom. When the sibling
+`p2000c-emulator` checkout and its `p2000c_cli` build are available, the same
+command additionally runs the application under CP/M. Those integration tests
+cover multi-extent files, hash collisions, a full 128-entry directory, and
+cache refreshes after copy, delete, and rename operations. Set
+`P2000C_ASSEMBLER`, `P2000C_EMULATOR_DIR`, or `P2000C_CLI` to use other paths.
+
 ### Continuous integration and releases
 
 GitHub Actions builds the latest default branch of `ifilot/p2000c-asm`, runs
@@ -138,12 +155,25 @@ The drive menu deliberately does not probe every configured drive. Under CP/M
 instead of returning an error to P2FILE. Insert or mount the desired disk before
 selecting its drive letter.
 
-### Incremental file sizes
+### Single-pass directory catalogs
 
-Both panels appear immediately with `?K` placeholders. Exact sizes are then
-resolved and cached one visible row at a time. Only the 21 on-screen rows are
-considered. Scrolling resolves newly exposed rows while retaining cached sizes
-for rows that remain visible.
+The first access to a drive performs one raw CP/M directory scan. P2FILE
+aggregates every extent by filename during that pass and stores the resulting
+name and three-byte record count in a compact RAM catalog. Both panels reuse
+the catalog, so drawing, scrolling, and returning to a previously visited drive
+do not issue per-file directory searches.
+
+Each drive catalog is capped at the application's 128-file display limit and
+uses 1,792 bytes. Keeping catalogs for all drives A: through F: therefore costs
+10.5 KiB, regardless of whether a drive is a floppy or a much larger hard-disk
+volume. This avoids retaining full hard-disk metadata tables in RAM. P2FILE
+invalidates the affected catalog after copy, delete, or rename; A: and B: are
+also refreshed when explicitly selected so changed removable media is seen.
+
+The complete runtime image, including all six catalogs, two panel work arrays,
+the existing 4 KiB copy buffer, DMA buffer, and stack, ends at `6306h`. Against
+the conservative `E000h` start used by the supported CP/M 2.2 system, more than
+31 KiB remains for CP/M and safety headroom.
 
 ### Buffered copying and progress
 

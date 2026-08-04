@@ -32,6 +32,11 @@ jobs:
       - name: Test p2000c-asm
         run: ctest --test-dir p2000c-asm/build --output-on-failure
 
+      - name: Test P2FILE
+        env:
+          P2000C_ASSEMBLER: ${{ github.workspace }}/p2000c-asm/build/p2000c-asm
+        run: python3 ./scripts/test.py
+
       - name: Assemble and package P2FILE
         env:
           P2000C_ASSEMBLER: ${{ github.workspace }}/p2000c-asm/build/p2000c-asm
