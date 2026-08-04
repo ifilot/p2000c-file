@@ -38,6 +38,17 @@ NORMATT EQU     40H
 INVATT  EQU     50H
 CPBUFR  EQU     32
 
+; Teletext proxy codes for 2x3 mosaic glyphs used by modal outlines. ESC 1
+; maps 20H-3FH to glyphs 00H-1FH and 60H-7FH to glyphs 80H-9FH.
+BOXTL   EQU     37H
+BOXH    EQU     23H
+BOXTR   EQU     6BH
+BOXL    EQU     35H
+BOXR    EQU     6AH
+BOXBL   EQU     75H
+BOXB    EQU     70H
+BOXBR   EQU     7AH
+
         ORG     0100H
 
 START:  LXI     SP,STACK
@@ -1686,29 +1697,60 @@ OVYES:  CALL    SHOWCOPY
         MVI     A,1
         RET
 
-; Four-row inverse-video copy modal. It deliberately stays clear of rows
-; 22-23, so the two-row keyboard legend remains visible during the operation.
-MODBOX: MVI     B,9
-MBLOOP:CALL    MODROW
+; Six-row normal-video modal with a 2x3-mosaic outline. Content stays on the
+; original rows 9-12; rows 8 and 13 supply the new top and bottom boundaries.
+; The box remains clear of rows 22-23, so the keyboard legend stays visible.
+MODBOX: MVI     A,NORMATT
+        CALL    SETATTR
+        MVI     A,1BH
+        CALL    PUTC
+        MVI     A,'1'
+        CALL    PUTC
+        MVI     B,8
+        MVI     C,20
+        CALL    POS
+        MVI     A,BOXTL
+        CALL    PUTC
+        MVI     D,38
+MBTOP:  MVI     A,BOXH
+        CALL    PUTC
+        DCR     D
+        JNZ     MBTOP
+        MVI     A,BOXTR
+        CALL    PUTC
+        MVI     B,9
+MBMID:  MVI     C,20
+        CALL    POS
+        MVI     A,BOXL
+        CALL    PUTC
+        MVI     D,38
+MBCLEAR:MVI     A,' '
+        CALL    PUTC
+        DCR     D
+        JNZ     MBCLEAR
+        MVI     A,BOXR
+        CALL    PUTC
         INR     B
         MOV     A,B
         CPI     13
-        JNZ     MBLOOP
-        RET
-
-MODROW:MOV     A,B
-        STA     MODROWNO
+        JNZ     MBMID
+        MVI     B,13
         MVI     C,20
         CALL    POS
-        MVI     A,INVATT
-        CALL    SETATTR
-        MVI     D,40
-MRCLEAR:MVI     A,' '
+        MVI     A,BOXBL
+        CALL    PUTC
+        MVI     D,38
+MBBOT:  MVI     A,BOXB
         CALL    PUTC
         DCR     D
-        JNZ     MRCLEAR
-        LDA     MODROWNO
-        MOV     B,A
+        JNZ     MBBOT
+        MVI     A,BOXBR
+        CALL    PUTC
+        MVI     A,1BH
+        CALL    PUTC
+        MVI     A,'2'
+        CALL    PUTC
+        MVI     B,9
         MVI     C,20
         CALL    POS
         RET
@@ -2374,8 +2416,6 @@ CPNUM:  DB      0
 MODAL:  DB      0
 FOOTMSG:DB      0
 KEYTMP: DB      0
-MODROWNO:
-        DB      0
 INLEN:  DB      0
 LEAD:   DB      0
 CACHEDRV:

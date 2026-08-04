@@ -15,6 +15,8 @@ All notable changes to P2FILE are documented here. The project follows
   clearing and redrawing the complete screen.
 - Hide the terminal's blinking cursor during normal operation, show it while a
   rename is being entered, and restore it before returning to CP/M.
+- Replace inverse-filled modal dialogs with normal-video dialogs outlined by
+  the P2000C character generator's 2x3 mosaic glyphs.
 
 ## [0.1.0]
 

@@ -75,6 +75,25 @@ class SourceTests(unittest.TestCase):
         self.assertIn("GNDONE: CALL    CURSOFF", rename_input)
         self.assertIn("GNCANCEL:\n        CALL    CURSOFF", rename_input)
 
+    def test_shared_modal_uses_normal_video_mosaic_outline(self) -> None:
+        source = ASM_SOURCE.read_text(encoding="ascii", errors="ignore")
+        modal = source.split("MODBOX:", 1)[1].split("SHOWCOPY:", 1)[0]
+        self.assertIn("MVI     A,NORMATT", modal)
+        self.assertNotIn("INVATT", modal)
+        for glyph in (
+            "BOXTL",
+            "BOXH",
+            "BOXTR",
+            "BOXL",
+            "BOXR",
+            "BOXBL",
+            "BOXB",
+            "BOXBR",
+        ):
+            with self.subTest(glyph=glyph):
+                self.assertIn(f"MVI     A,{glyph}", modal)
+        self.assertEqual(source.count("CALL    MODBOX"), 5)
+
     def test_embedded_versions_match_version_file(self) -> None:
         source = ASM_SOURCE.read_text(encoding="ascii", errors="ignore")
         for declaration in (
@@ -185,6 +204,18 @@ class EmulatorIntegrationTests(unittest.TestCase):
     def screen(self, result: dict[str, object]) -> str:
         return "\n".join(result["screen"])
 
+    def assert_modal_outline(self, result: dict[str, object]) -> None:
+        screen = result["screen"]
+        self.assertEqual(ord(screen[8][20]), 0x17)
+        self.assertEqual({ord(value) for value in screen[8][21:59]}, {0x03})
+        self.assertEqual(ord(screen[8][59]), 0x8B)
+        for row in range(9, 13):
+            self.assertEqual(ord(screen[row][20]), 0x15)
+            self.assertEqual(ord(screen[row][59]), 0x8A)
+        self.assertEqual(ord(screen[13][20]), 0x95)
+        self.assertEqual({ord(value) for value in screen[13][21:59]}, {0x90})
+        self.assertEqual(ord(screen[13][59]), 0x9A)
+
     def test_single_scan_aggregates_hash_collisions_and_extents(self) -> None:
         files = [
             self.program,
@@ -289,6 +320,20 @@ class EmulatorIntegrationTests(unittest.TestCase):
         self.assertRegex(first_file_row[:40], r">\* P2FILE\s+\.COM")
         self.assertNotIn("* P2FILE", first_file_row[40:])
 
+    def test_drive_dialog_uses_mosaic_outline(self) -> None:
+        disk = self.make_disk("dialog.flp", [self.program])
+        result = self.run_app(
+            disk,
+            "--send",
+            "V",
+            "--wait-for",
+            "SELECT DRIVE",
+            "--run",
+            "1000000",
+        )
+        self.assert_modal_outline(result)
+        self.assertIn("SELECT DRIVE", self.screen(result))
+
     def test_catalog_accepts_all_128_directory_entries(self) -> None:
         files = [self.program]
         files.extend(
@@ -321,15 +366,15 @@ class EmulatorIntegrationTests(unittest.TestCase):
     def test_cache_is_refreshed_after_copy_delete_and_rename(self) -> None:
         disk = self.make_disk("operations.flp", [self.program])
 
-        copied = self.screen(
-            self.run_app(
-                disk,
-                "--send",
-                "C",
-                "--run",
-                "10000000",
-            )
+        copied_result = self.run_app(
+            disk,
+            "--send",
+            "C",
+            "--run",
+            "10000000",
         )
+        copied = self.screen(copied_result)
+        self.assert_modal_outline(copied_result)
         self.assertIn("DRIVE B:    2 FILES", copied)
         self.assertRegex(copied, r"CPM61\s+\.COM\s+6K")
         self.assertIn("Copy complete.", copied)
